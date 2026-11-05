@@ -1,4 +1,24 @@
 /* Le style de l'appli : thème sombre, couleurs, tableaux, cartes, boutons. */
+.surface-filters { margin-top: 18px; }
+.surface-view-controls { margin-top: 8px; }
+.surface-view-controls input[type=range] { width: 180px; }
+input[type=checkbox] { min-width: 0; width: 14px; accent-color: var(--accent); }
+.vol-surface-chart { max-height: 500px; }
+.surface-axes line { stroke: #8a96a8; stroke-width: 1; }
+.vol-facet { stroke: #0e1117; stroke-width: .5; fill-opacity: .88; }
+.vol-facet:hover { stroke: white; fill-opacity: 1; }
+.comparison-mesh { stroke: #f5b942; stroke-width: 1.5; stroke-dasharray: 5 3; fill: none; }
+.vol-chart-labels { fill: #a9b5c7; font-size: 12px; font-family: var(--mono); }
+.term-line { fill: none; stroke: #4c9dff; stroke-width: 2.5; }
+.term-line.comparison { stroke: #f5b942; stroke-dasharray: 6 4; }
+.term-dot { fill: #4c9dff; }
+.term-dot.comparison { fill: #f5b942; }
+.surface-key { display: inline-block; width: 20px; height: 3px; vertical-align: middle; }
+.primary-key { background: #4c9dff; }
+.compare-key { background: #f5b942; }
+.vol-heatmap td, .vol-heatmap th { min-width: 86px; }
+.table-scroll { overflow-x: auto; }
+@media (max-width: 1000px) { .topbar { height: auto !important; flex-wrap: wrap; padding-top: 10px !important; } .topbar nav { flex-wrap: wrap; } }
 :root {
     --bg: #0e1117;
     --panel: #161b24;

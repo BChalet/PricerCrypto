@@ -17,13 +17,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{D3740475
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.SampleGenerator", "tools\DeribitPricer.SampleGenerator\DeribitPricer.SampleGenerator.csproj", "{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.Excel", "src\DeribitPricer.Excel\DeribitPricer.Excel.csproj", "{8037A7C2-35E5-4A18-96FE-644913C667B3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{8CE03960-7FD8-4672-B885-BF0DC2810624}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -42,11 +41,19 @@ Global
 		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8037A7C2-35E5-4A18-96FE-644913C667B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8037A7C2-35E5-4A18-96FE-644913C667B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8037A7C2-35E5-4A18-96FE-644913C667B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8037A7C2-35E5-4A18-96FE-644913C667B3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{8CE03960-7FD8-4672-B885-BF0DC2810624} = {83696225-761D-4549-A778-8B325D7A6581}
 		{C2F00081-59F5-43FD-B997-733B5E6432FA} = {83696225-761D-4549-A778-8B325D7A6581}
 		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E} = {C5BFEF96-1EC3-4F84-BCD8-17E123A7EC31}
 		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA} = {D3740475-BE6F-4881-851E-7C3BD6586403}
+		{8037A7C2-35E5-4A18-96FE-644913C667B3} = {83696225-761D-4549-A778-8B325D7A6581}
 	EndGlobalSection
 EndGlobal

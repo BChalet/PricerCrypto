@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DnaLibrary Name="Pricer Deribit" RuntimeVersion="v10.0" RollForward="LatestMinor" xmlns="http://schemas.excel-dna.net/addin/2020/07/dnalibrary">
+  <ExternalLibrary Path="DeribitPricer.Excel.dll" ExplicitExports="true" LoadFromBytes="true" Pack="true" />
+</DnaLibrary>

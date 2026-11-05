@@ -25,7 +25,35 @@ Pour un rejeu accéléré, mettre par exemple `"ReplaySpeed": 10` dans `appsetti
 
 Puis ouvrir http://localhost:5106 (le navigateur s'ouvre normalement tout seul).
 
-Tests unitaires : `dotnet test` (31 tests).
+Tests unitaires et API : `dotnet test` (38 tests).
+
+## Nappe de volatilité et structure par terme
+
+Le nouvel onglet **Volatilité** affiche la nappe implicite 3D par sous-jacent (K/F × maturité × vol),
+une carte de la nappe et la structure par terme ATM ou à moneyness constante.
+Le bouton **Enregistrer la nappe actuelle** conserve une observation datée ; en live, des captures
+sont également enregistrées toutes les cinq minutes dans `data/volatility/`.
+Choisir les dates et observations A/B pour superposer les nappes et afficher leurs écarts en points de vol.
+La comparaison se fait à maturité résiduelle et K/F constants, sans extrapolation.
+
+Un historique antérieur (par exemple janvier contre octobre) nécessite des captures ou des enregistrements
+réels de ces dates. Les données manquantes ne sont pas inventées ; le rejeu est signalé distinctement.
+Pour changer le stockage ou la fréquence sans modifier les fichiers du projet :
+
+```bash
+dotnet run --project src/DeribitPricer.App -- --SurfaceHistory:Directory=/chemin/archives --SurfaceHistory:CaptureSeconds=300
+```
+
+## Pricing depuis Excel 365 Windows
+
+Le complément C# Excel-DNA fournit `=PRICEOPTION(...)`, `=VOLIMPLI(...)` et `=VOLSURFACE(...)`
+(matrice déversée). Il utilise une API locale ajoutée à l'application et le moteur de pricing C#.
+L'application doit tourner sur le même ordinateur qu'Excel.
+
+Compilation du complément : `dotnet build src/DeribitPricer.Excel -c Release`.
+Les fichiers XLL 32/64 bits sont générés dans son dossier `bin/Release/net10.0-windows/publish/`.
+Voir [le guide Excel](docs/EXCEL.md) pour l'installation, les formules, les unités et les conventions.
+Un [classeur d'exemple](examples/Excel/PricerCrypto.xlsx) est fourni avec les trois fonctions.
 
 ## Live, enregistrement et rejeu 
 

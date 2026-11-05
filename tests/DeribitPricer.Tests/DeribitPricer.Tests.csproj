@@ -19,6 +19,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DeribitPricer.Core\DeribitPricer.Core.csproj" />
+    <ProjectReference Include="..\..\src\DeribitPricer.App\DeribitPricer.App.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <Compile Include="../../src/DeribitPricer.Excel/PricerApiClient.cs" Link="Excel/PricerApiClient.cs" />
   </ItemGroup>
 
 </Project>

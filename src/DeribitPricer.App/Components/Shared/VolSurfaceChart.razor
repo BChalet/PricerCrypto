@@ -1,0 +1,100 @@
+<div class="toolbar surface-view-controls">
+    <label>Rotation <input aria-label="Rotation de la nappe" type="range" min="-50" max="50" step="5" @bind="_rotation" /></label>
+    <span class="hint">Survolez une facette pour lire la vol. Horizontal : K/F ; profondeur : jours ; hauteur : vol.</span>
+</div>
+<svg class="chart vol-surface-chart" viewBox="0 0 900 430" role="img" aria-label="Nappe de volatilité implicite en trois dimensions">
+    <g class="surface-axes">
+        <line x1="@N(Project(0, 0, _zMin).X)" y1="@N(Project(0, 0, _zMin).Y)" x2="@N(Project(1, 0, _zMin).X)" y2="@N(Project(1, 0, _zMin).Y)" />
+        <line x1="@N(Project(0, 0, _zMin).X)" y1="@N(Project(0, 0, _zMin).Y)" x2="@N(Project(0, 1, _zMin).X)" y2="@N(Project(0, 1, _zMin).Y)" />
+        <line x1="@N(Project(0, 0, _zMin).X)" y1="@N(Project(0, 0, _zMin).Y)" x2="@N(Project(0, 0, _zMax).X)" y2="@N(Project(0, 0, _zMax).Y)" />
+    </g>
+    @foreach (var facet in Facets())
+    {
+        <polygon points="@facet.Path" fill="@Color(facet.Vol)" class="vol-facet"><title>@facet.Label</title></polygon>
+    }
+    @if (Comparison != null)
+    {
+        @foreach (var path in ComparisonLines()) { <polyline points="@path" class="comparison-mesh" /> }
+    }
+    @for (var i = 0; i <= 4; i++)
+    {
+        var x = i / 4.0; var p = Project(x, 0, _zMin); var q = Project(0, x, _zMin);
+        var v = _zMin + (_zMax - _zMin) * x; var z = Project(0, 0, v);
+        <g class="vol-chart-labels">
+            <text x="@N(p.X)" y="@N(p.Y + 24)" text-anchor="middle">@Fmt.Num((MinMoneyness + x * (MaxMoneyness - MinMoneyness)) * 100, "0") %</text>
+            <text x="@N(q.X - 12)" y="@N(q.Y + 5)" text-anchor="end">@Fmt.Num(_minDays + x * (_maxDays - _minDays), "0") j</text>
+            <text x="@N(z.X - 8)" y="@N(z.Y - 6)" text-anchor="end">@Fmt.Num(v * 100, "0.0") %</text>
+        </g>
+    }
+    <g class="vol-chart-labels">
+        <text x="510" y="424" text-anchor="middle">Moneyness K/F · 100 % = ATM</text>
+        <text x="90" y="75">Vol implicite</text>
+        @if (_facetCount == 0) { <g><text x="450" y="200" text-anchor="middle">Pas assez de points dans cette plage K/F.</text></g> }
+    </g>
+</svg>
+<p class="hint"><span class="surface-key primary-key"></span> Observation A
+    @if (Comparison != null) { <span> · <span class="surface-key compare-key"></span> Observation B (pointillés)</span> }
+    · Les zones sans données restent vides.</p>
+
+@code {
+    [Parameter, EditorRequired] public VolatilitySurface Surface { get; set; } = default!;
+    [Parameter] public VolatilitySurface? Comparison { get; set; }
+    [Parameter] public double MinMoneyness { get; set; } = 0.7;
+    [Parameter] public double MaxMoneyness { get; set; } = 1.3;
+    private int _rotation, _facetCount;
+    private double _minDays, _maxDays, _zMin, _zMax = 1;
+    private readonly double?[,] _a = new double?[13, 25], _b = new double?[13, 25];
+    protected override void OnParametersSet()
+    {
+        if (Surface.Slices.Count == 0) return;
+        _minDays = (Surface.Slices[0].ExpiryUtc - Surface.AsOfUtc).TotalDays;
+        _maxDays = (Surface.Slices[^1].ExpiryUtc - Surface.AsOfUtc).TotalDays;
+        var vols = new List<double>();
+        for (int y = 0; y <= 12; y++)
+            for (int x = 0; x <= 24; x++)
+            {
+                var m = MinMoneyness + (MaxMoneyness - MinMoneyness) * x / 24;
+                var days = _minDays + (_maxDays - _minDays) * y / 12;
+                _a[y, x] = Surface.VolAt(days, m); _b[y, x] = Comparison?.VolAt(days, m);
+                if (_a[y, x] is { } a) vols.Add(a);
+                if (_b[y, x] is { } b) vols.Add(b);
+            }
+        _zMin = vols.Count > 0 ? Math.Max(0, vols.Min() - 0.02) : 0;
+        _zMax = vols.Count > 0 ? vols.Max() + 0.02 : 1;
+    }
+    private (double X, double Y) Project(double x, double y, double z) =>
+        (210 + x * (510 + _rotation * 1.5) - y * (105 + _rotation * 1.5),
+         340 - x * _rotation - y * 115 - (z - _zMin) / (_zMax - _zMin) * 220);
+    private static string N(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+    private string Point(int x, int y, double vol)
+    {
+        var p = Project(x / 24.0, y / 12.0, vol); return $"{N(p.X)},{N(p.Y)}";
+    }
+    private string Color(double vol) => $"hsl({N(220 - (vol - _zMin) / (_zMax - _zMin) * 180)}, 65%, 48%)";
+    private IEnumerable<(string Path, double Vol, string Label)> Facets()
+    {
+        _facetCount = 0;
+        for (int y = 11; y >= 0; y--)
+            for (int x = 0; x < 24; x++)
+                if (_a[y, x] is { } a && _a[y, x + 1] is { } b && _a[y + 1, x + 1] is { } c && _a[y + 1, x] is { } d)
+                {
+                    _facetCount++;
+                    yield return ($"{Point(x, y, a)} {Point(x + 1, y, b)} {Point(x + 1, y + 1, c)} {Point(x, y + 1, d)}",
+                        (a + b + c + d) / 4,
+                        $"K/F {Fmt.Pct((MinMoneyness + (MaxMoneyness - MinMoneyness) * x / 24) * 100)} · {Fmt.Num(_minDays + (_maxDays - _minDays) * y / 12, "0.0")} j · vol {Fmt.Pct(a * 100)}");
+                }
+    }
+    private IEnumerable<string> ComparisonLines()
+    {
+        for (int y = 0; y <= 12; y++)
+        {
+            var points = new List<string>();
+            for (int x = 0; x <= 24; x++)
+            {
+                if (_b[y, x] is { } v) points.Add(Point(x, y, v));
+                else { if (points.Count > 1) yield return string.Join(" ", points); points.Clear(); }
+            }
+            if (points.Count > 1) yield return string.Join(" ", points);
+        }
+    }
+}

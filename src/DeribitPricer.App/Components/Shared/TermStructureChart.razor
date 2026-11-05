@@ -1,0 +1,65 @@
+<svg class="chart" viewBox="0 0 860 280" role="img" aria-label="Structure par terme de la volatilité implicite">
+    @for (var i = 0; i <= 4; i++)
+    {
+        var v = _min + (_max - _min) * i / 4;
+        <g class="vol-chart-labels">
+            <line x1="65" x2="825" y1="@N(Y(v))" y2="@N(Y(v))" class="grid" />
+            <text x="58" y="@N(Y(v) + 4)" text-anchor="end">@Fmt.Num(v * 100, "0.0") %</text>
+        </g>
+    }
+    @foreach (var days in LabelTenors())
+    {
+        <g class="vol-chart-labels"><text x="@N(X(days))" y="242" text-anchor="middle">@Fmt.Num(days, "0.#")</text></g>
+    }
+    @foreach (var path in Paths(Surface)) { <polyline points="@path" class="term-line" /> }
+    @if (Comparison != null)
+    {
+        @foreach (var path in Paths(Comparison)) { <polyline points="@path" class="term-line comparison" /> }
+    }
+    @foreach (var days in Tenors)
+    {
+        @if (Surface.VolAt(days, Moneyness) is { } v)
+        {
+            <circle cx="@N(X(days))" cy="@N(Y(v))" r="4" class="term-dot"><title>A · @Fmt.Num(days, "0.0") j · @Fmt.Pct(v * 100)</title></circle>
+        }
+        @if (Comparison?.VolAt(days, Moneyness) is { } w)
+        {
+            <circle cx="@N(X(days))" cy="@N(Y(w))" r="4" class="term-dot comparison"><title>B · @Fmt.Num(days, "0.0") j · @Fmt.Pct(w * 100)</title></circle>
+        }
+    }
+    <g class="vol-chart-labels"><text x="440" y="271" text-anchor="middle">Maturité résiduelle (jours ACT/365) · K/F = @Fmt.Pct(Moneyness * 100)</text></g>
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public VolatilitySurface Surface { get; set; } = default!;
+    [Parameter] public VolatilitySurface? Comparison { get; set; }
+    [Parameter] public double Moneyness { get; set; } = 1;
+    [Parameter] public IReadOnlyList<double> Tenors { get; set; } = [];
+    private double _min, _max = 1, _maxDays = 1;
+    protected override void OnParametersSet()
+    {
+        var vols = Tenors.SelectMany(t => new[] { Surface.VolAt(t, Moneyness), Comparison?.VolAt(t, Moneyness) }).OfType<double>().ToArray();
+        _min = vols.Length == 0 ? 0 : Math.Max(0, vols.Min() - 0.02);
+        _max = vols.Length == 0 ? 1 : vols.Max() + 0.02;
+        _maxDays = Math.Max(1, Tenors.DefaultIfEmpty(1).Max());
+    }
+    private double X(double days) => 65 + days / _maxDays * 760;
+    private double Y(double vol) => 220 - (vol - _min) / (_max - _min) * 200;
+    private static string N(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+    private IEnumerable<double> LabelTenors()
+    {
+        double previous = -100;
+        foreach (var days in Tenors)
+            if (X(days) - previous >= 42) { previous = X(days); yield return days; }
+    }
+    private IEnumerable<string> Paths(VolatilitySurface surface)
+    {
+        var points = new List<string>();
+        foreach (var t in Tenors)
+        {
+            if (surface.VolAt(t, Moneyness) is { } v) points.Add($"{N(X(t))},{N(Y(v))}");
+            else { if (points.Count > 1) yield return string.Join(" ", points); points.Clear(); }
+        }
+        if (points.Count > 1) yield return string.Join(" ", points);
+    }
+}

@@ -25,6 +25,11 @@ builder.Services.AddSingleton(_ =>
 });
 builder.Services.AddSingleton<BookService>();
 builder.Services.AddHostedService<MarketDataHostedService>();
+var historyOptions = builder.Configuration.GetSection("SurfaceHistory").Get<SurfaceHistoryOptions>() ?? new();
+builder.Services.AddSingleton(historyOptions);
+builder.Services.AddSingleton(new SurfaceSnapshotRepository(DataPaths.Resolve(historyOptions.Directory)));
+builder.Services.AddSingleton<VolatilityService>();
+builder.Services.AddHostedService<SurfaceHistoryHostedService>();
 
 var app = builder.Build();
 
@@ -32,6 +37,7 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 
 app.UseAntiforgery();
+app.MapPricingApi();
 
 // Exports téléchargeables à tout moment.
 string Stamp() => DateTime.Now.ToString("yyyyMMdd-HHmmss");
@@ -50,3 +56,5 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Services.GetRequiredService<BookService>();
 
 app.Run();
+
+public partial class Program { }

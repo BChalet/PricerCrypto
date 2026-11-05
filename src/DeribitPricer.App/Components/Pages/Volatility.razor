@@ -1,0 +1,169 @@
+@page "/volatilite"
+@inherits LivePage
+@inject VolatilityService SurfaceService
+@inject SurfaceSnapshotRepository History
+
+<PageTitle>Volatilité · Pricer Deribit</PageTitle>
+<div class="row-between">
+    <div><h1>Nappe de volatilité implicite</h1><p class="hint">Smile, structure par terme et comparaison d'observations datées.</p></div>
+    <button class="primary" @onclick="Save" disabled="@_saving">@(_saving ? "Enregistrement…" : "Enregistrer la nappe actuelle")</button>
+</div>
+<div class="panel surface-filters">
+    <div class="toolbar">
+        <label>Sous-jacent
+            <select @bind="_currency" @bind:after="ChangeCurrency">
+                @foreach (var c in Store.Currencies.Concat(_history.Select(s => s.Currency)).Append(_currency).Distinct().Order()) { <option value="@c">@c</option> }
+            </select>
+        </label>
+        <label>Date A (UTC) <input type="date" @bind="_dateA" @bind:after="FilterA" /></label>
+        <label>Observation A
+            <select @bind="_sourceA" @bind:after="LoadA">
+                <option value="">Marché actuel · @Store.Status.Mode</option>
+                @foreach (var s in AtDate(_dateA)) { <option value="@s.Id">@Label(s)</option> }
+            </select>
+        </label>
+        <label class="check"><input type="checkbox" @bind="_compare" @bind:after="LoadB" /> Comparer à une date</label>
+        @if (_compare)
+        {
+            <label>Date B (UTC) <input type="date" @bind="_dateB" @bind:after="FilterB" /></label>
+            <label>Observation B
+                <select @bind="_sourceB" @bind:after="LoadB">
+                    <option value="">Choisir un instantané</option>
+                    @foreach (var s in AtDate(_dateB)) { <option value="@s.Id">@Label(s)</option> }
+                </select>
+            </label>
+        }
+    </div>
+    <p class="hint">Historique local : capture automatique toutes les 5 minutes en live, capture manuelle en live ou rejeu.
+        Dates disponibles : @(!CurrencyHistory.Any() ? "aucune pour ce sous-jacent" : string.Join(", ", CurrencyHistory.Select(s => s.AsOfUtc.Date).Distinct().Order().Select(Fmt.Date))).</p>
+    @if (!AtDate(_dateA).Any()) { <p class="hint">Aucun instantané enregistré le @Fmt.Date(_dateA). « Marché actuel » affiche l'observation courante, datée ci-dessous.</p> }
+    @if (_compare && _b == null) { <div class="alert warn">Aucune observation B sélectionnée pour cette date. Les données historiques absentes ne sont pas reconstituées.</div> }
+    @if (_message != null) { <div class="alert success" role="status">@_message</div> }
+    @if (_error != null) { <div class="alert error" role="alert">@_error</div> }
+</div>
+@if (_a is { Slices.Count: > 0 } a)
+{
+    <div class="cards">
+        <div class="card accent"><div class="label">Observation A · @a.Mode</div><div class="value small-value">@Fmt.DateTime(a.AsOfUtc) UTC</div><div class="sub">@(_sourceA == "" ? "Marché actuel" : "Instantané enregistré")</div></div>
+        <div class="card"><div class="label">Couverture</div><div class="value">@a.Slices.Count échéances</div><div class="sub">@a.Slices.Sum(s => s.Points.Count) points de smile · vols recalculées au mark</div></div>
+        <div class="card"><div class="label">Dernière cotation de la nappe</div><div class="value small-value">@QuoteTime(a)</div><div class="sub">@Freshness(a)</div></div>
+        @if (_b is { } b) { <div class="card"><div class="label">Observation B · @b.Mode</div><div class="value small-value">@Fmt.DateTime(b.AsOfUtc) UTC</div><div class="sub">Dernière cotation : @QuoteTime(b)</div></div> }
+    </div>
+    @if (a.Mode == "Replay" || _b?.Mode == "Replay") { <div class="alert warn">Données de rejeu : un fichier peut être simulé. Ces observations ne prouvent pas les conditions historiques réelles du marché.</div> }
+    <div class="panel">
+        <div class="row-between"><h2>Nappe 3D · @_currency</h2><label>Plage K/F
+            <select @bind="_range"><option value="0.1">90–110 %</option><option value="0.3">70–130 %</option><option value="0.5">50–150 %</option></select>
+        </label></div>
+        @if (a.Slices.Count > 1) { <VolSurfaceChart Surface="a" Comparison="_b" MinMoneyness="@(1 - _range)" MaxMoneyness="@(1 + _range)" /> }
+        else { <p class="hint">Une seule échéance disponible : pas de nappe 3D entre maturités. Les points du smile figurent dans la carte ci-dessous.</p> }
+    </div>
+    <div class="panel">
+        <div class="row-between"><h2>Structure par terme</h2><label>Moneyness constante K/F
+            <select @bind="_moneyness"><option value="0.8">80 %</option><option value="0.9">90 %</option><option value="1">100 % · ATM forward</option><option value="1.1">110 %</option><option value="1.2">120 %</option></select>
+        </label></div>
+        <TermStructureChart Surface="a" Comparison="_b" Moneyness="_moneyness" Tenors="Tenors" />
+        <table class="grid term-table">
+            <thead><tr><th>Maturité (j)</th><th>Vol A</th>@if (_b != null) { <th>Vol B</th><th>Écart A − B (points de vol)</th> }</tr></thead>
+            <tbody>
+                @foreach (var days in Tenors)
+                {
+                    var va = a.VolAt(days, _moneyness); var vb = _b?.VolAt(days, _moneyness);
+                    <tr><td>@Fmt.Num(days, "0.00")</td><td>@Fmt.Pct(va * 100)</td>
+                        @if (_b != null) { <td>@Fmt.Pct(vb * 100)</td><td class="@Fmt.SignClass((va - vb) * 100)">@Fmt.Signed((va - vb) * 100, 2)</td> }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="panel">
+        <h2>@(_b == null ? "Carte de la nappe A · vol en %" : "Carte des écarts A − B · points de vol")</h2>
+        <div class="table-scroll"><table class="grid vol-heatmap"><thead><tr><th>Maturité / K/F</th>
+            @foreach (var m in MoneynessGrid) { <th>@Fmt.Pct(m * 100, 1)</th> }
+        </tr></thead><tbody>
+            @foreach (var days in Tenors)
+            {
+                <tr><td>@Fmt.Num(days, "0.00") j</td>
+                    @foreach (var m in MoneynessGrid)
+                    {
+                        var va = a.VolAt(days, m); var vb = _b?.VolAt(days, m);
+                        var value = _b == null ? va * 100 : (va - vb) * 100;
+                        <td style="@Heat(value, _b != null)" title="A : @Fmt.Pct(va * 100) · B : @Fmt.Pct(vb * 100)">@Fmt.Num(value, "0.00")</td>
+                    }
+                </tr>
+            }
+        </tbody></table></div>
+    </div>
+}
+else { <div class="panel muted">Pas encore de nappe calculable pour @_currency. Vérifier le flux ou choisir un instantané enregistré.</div> }
+<p class="hint">Méthode : inversion Black-76 au mark, option hors de la monnaie privilégiée ; interpolation linéaire en ln(K/F), puis en variance totale entre échéances.
+    Comparaison à moneyness et maturité résiduelle constantes, sans extrapolation. « — » signifie hors couverture.
+    Cette interpolation n'impose pas l'absence d'arbitrage à toute la nappe.
+    Un historique antérieur exige des captures ou des enregistrements de cette date ; aucune nappe passée n'est inventée à partir de la volatilité réalisée.</p>
+
+@code {
+    private string _currency = "BTC", _sourceA = "", _sourceB = "";
+    private DateTime _dateA, _dateB;
+    private bool _compare, _saving;
+    private double _range = 0.3, _moneyness = 1;
+    private VolatilitySurface? _a, _b;
+    private IReadOnlyList<SurfaceSnapshotInfo> _history = [];
+    private string? _message, _error;
+    private IReadOnlyList<double> Tenors => _a?.Slices.Select(s => (s.ExpiryUtc - _a.AsOfUtc).TotalDays).ToArray() ?? [];
+    private IEnumerable<double> MoneynessGrid => Enumerable.Range(0, 9).Select(i => 1 - _range + i * _range / 4);
+    protected override void OnStart()
+    {
+        _currency = Store.Currencies.FirstOrDefault() ?? "BTC";
+        _dateA = _dateB = Store.Now.Date; _a = SurfaceService.Current(_currency);
+    }
+    protected override async Task OnInitializedAsync() => await RefreshHistory();
+    protected override void OnTick() { if (_sourceA == "") _a = SurfaceService.Current(_currency); }
+    private IEnumerable<SurfaceSnapshotInfo> CurrencyHistory => _history.Where(s => s.Currency == _currency);
+    private IEnumerable<SurfaceSnapshotInfo> AtDate(DateTime date) => CurrencyHistory.Where(s => s.AsOfUtc.Date == date.Date);
+    private static string Label(SurfaceSnapshotInfo s) => $"{s.AsOfUtc:HH:mm:ss} UTC · {s.Mode} · {s.Id[..6]}";
+    private async Task RefreshHistory()
+    {
+        try { _history = await History.ListAsync(null); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _error = "Historique indisponible : " + ex.Message; }
+    }
+    private async Task ChangeCurrency()
+    {
+        _sourceA = _sourceB = ""; _b = null; _error = _message = null;
+        await RefreshHistory(); await LoadA();
+    }
+    private async Task FilterA() { _sourceA = AtDate(_dateA).FirstOrDefault()?.Id ?? ""; await LoadA(); }
+    private async Task FilterB() { _sourceB = AtDate(_dateB).FirstOrDefault()?.Id ?? ""; await LoadB(); }
+    private async Task LoadA()
+    {
+        try { _a = await SurfaceService.GetAsync(_currency, _sourceA); }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException) { _error = "Lecture impossible : " + ex.Message; _a = null; }
+    }
+    private async Task LoadB()
+    {
+        _b = null;
+        if (!_compare || _sourceB == "") return;
+        try { _b = await SurfaceService.GetAsync(_currency, _sourceB); }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException) { _error = "Lecture impossible : " + ex.Message; }
+    }
+    private async Task Save()
+    {
+        _saving = true; _error = _message = null;
+        try
+        {
+            var s = await History.SaveAsync(SurfaceService.Current(_currency));
+            _message = $"Nappe enregistrée au {Fmt.DateTime(s.Surface.AsOfUtc)} UTC · {s.Surface.Mode}.";
+            await RefreshHistory();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+    private static string QuoteTime(VolatilitySurface s) => s.Slices.Max(x => x.LatestQuoteUtc) is { } ts ? Fmt.DateTime(ts) + " UTC" : "—";
+    private static string Freshness(VolatilitySurface s) => s.Slices.Min(x => x.OldestQuoteUtc) is { } ts
+        ? $"Cotation la plus ancienne : {Fmt.DateTime(ts)} UTC. Les échéances peuvent avoir des horodatages différents." : "Horodatage indisponible";
+    private static string Heat(double? value, bool delta)
+    {
+        if (!value.HasValue) return "";
+        var alpha = Math.Min(0.5, delta ? Math.Abs(value.Value) / 10 : value.Value / 180);
+        var rgb = delta ? (value >= 0 ? "62,207,142" : "255,107,107") : "76,157,255";
+        return $"background:rgba({rgb},{alpha.ToString("0.###", CultureInfo.InvariantCulture)})";
+    }
+}
