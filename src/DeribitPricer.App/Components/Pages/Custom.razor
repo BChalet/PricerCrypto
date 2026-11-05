@@ -1,0 +1,384 @@
+@* Onglet Sur mesure : on cote une option non cotée sur Deribit, on calcule sa couverture et le prix client, et on peut traiter. *@
+@page "/sur-mesure"
+@inherits LivePage
+@inject Blotter Blotter
+
+<PageTitle>Sur mesure · Pricer Deribit</PageTitle>
+
+<h1>Option sur mesure</h1>
+
+<div class="panel form">
+    <div class="form-grid">
+        <label>Devise
+            <select @bind="_currency">
+                @foreach (var c in Store.Currencies)
+                {
+                    <option value="@c">@c</option>
+                }
+            </select>
+        </label>
+        <label>Type
+            <select @bind="_type">
+                <option value="@OptionType.Call">Call</option>
+                <option value="@OptionType.Put">Put</option>
+            </select>
+        </label>
+        <label>Strike (USD) <input type="number" step="any" @bind="_strike" /></label>
+        <label>Échéance (08:00 UTC) <input type="date" @bind="_expiryDate" /></label>
+        <label>Client
+            <select @bind="_clientSide">
+                <option value="buy">achète</option>
+                <option value="sell">vend</option>
+            </select>
+        </label>
+        <label>Quantité <input type="number" step="any" @bind="_quantity" /></label>
+        <label>Marge desk (USD/option) <input type="number" step="any" @bind="_marginUsd" /></label>
+        <button class="primary" @onclick="Quote">Coter</button>
+    </div>
+    <p class="hint">
+        Échéances cotées :
+        @foreach (var e in Store.GetOptionExpiries(_currency).Where(e => e > Store.Now))
+        {
+            <span class="chip" @onclick="() => _expiryDate = e.Date">@Instrument.FormatExpiry(e)</span>
+        }
+    </p>
+    @foreach (var error in _errors)
+    {
+        <div class="alert error">@error</div>
+    }
+</div>
+
+@if (_valuation is { } v)
+{
+    double q0 = DeskQuantity;
+    double clientPrice = HedgeCalculator.ClientPriceUsd(v, q0, _hedge?.HedgeCostUsd ?? 0, _marginUsd);
+
+    <h2>@v.Spec.Name · le client @(_clientBuys ? "achète" : "vend") @Fmt.Qty(_quantity) (desk : @Fmt.Signed(q0, 1))</h2>
+
+    <div class="cards">
+        <div class="card"><div class="label">Future interpolé F(T)</div><div class="value">@Fmt.Usd(v.Forward)</div><div class="sub">T = @Fmt.Days(v.T)</div></div>
+        <div class="card"><div class="label">Vol interpolée</div><div class="value">@Fmt.Pct(v.Vol * 100)</div><div class="sub">k = ln(K/F) = @Fmt.Num(v.LogMoneyness, "0.0000")</div></div>
+        <div class="card"><div class="label">Prix théorique</div><div class="value">@Fmt.Usd(v.TheoUsd) USD</div><div class="sub">@Fmt.Coin(v.TheoCoin, 6) @_currency</div></div>
+        <div class="card accent">
+            <div class="label">Prix proposé au client</div>
+            <div class="value">@Fmt.Usd(clientPrice) USD</div>
+            <div class="sub">@Fmt.Coin(clientPrice / v.Forward, 6) @_currency · total @Fmt.Usd(clientPrice * _quantity) USD</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Interpolation (annexe C)</h3>
+        <table class="grid">
+            <thead>
+                <tr><th class="left">Échéance cotée</th><th>Ti (j)</th><th>Fi</th><th>Ki = Fi·e^k</th><th>Ka</th><th>σa</th><th>Kb</th><th>σb</th><th>σi</th><th>wi = σi²Ti</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var s in v.Slices)
+                {
+                    <tr>
+                        <td class="left">@Instrument.FormatExpiry(s.Expiry)</td>
+                        <td>@Fmt.Num(s.T * 365, "0.00")</td>
+                        <td>@Fmt.Usd(s.Forward)</td>
+                        <td>@Fmt.Usd(s.EquivalentStrike, 0)</td>
+                        <td>@Fmt.Strike(s.StrikeA)</td><td>@Fmt.Pct(s.VolA * 100)</td>
+                        <td>@Fmt.Strike(s.StrikeB)</td><td>@Fmt.Pct(s.VolB * 100)</td>
+                        <td><b>@Fmt.Pct(s.Vol * 100)</b></td>
+                        <td>@Fmt.Num(s.TotalVariance, "0.000000")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="hint">
+            @(v.OnListedExpiry
+                ? "Échéance cotée : seule l'étape 3 s'applique (interpolation en log-moneyness sur cette échéance)."
+                : "Future interpolé linéairement en temps ; vol interpolée en log-moneyness sur chaque échéance encadrante (vols calculées à partir du mark), puis variance totale interpolée en temps.")
+        </p>
+    </div>
+
+    <div class="panel">
+        <h3>Couverture delta / gamma / vega</h3>
+        <div class="form-grid">
+            <label>Option 1 — échéance
+                <select @bind="_h1Expiry" @bind:after="() => _h1Name = FirstOption(_h1Expiry)">
+                    @ExpiryOptions()
+                </select>
+            </label>
+            <label>Option 1
+                <select @bind="_h1Name">@OptionChoices(_h1Expiry)</select>
+            </label>
+            <label>Option 2 — échéance
+                <select @bind="_h2Expiry" @bind:after="() => _h2Name = FirstOption(_h2Expiry)">
+                    @ExpiryOptions()
+                </select>
+            </label>
+            <label>Option 2
+                <select @bind="_h2Name">@OptionChoices(_h2Expiry)</select>
+            </label>
+            <label>Future (delta)
+                <select @bind="_futureName">
+                    @foreach (var f in Store.GetFutures(_currency))
+                    {
+                        <option value="@f.Name">@f.Name</option>
+                    }
+                </select>
+            </label>
+            <button @onclick="Suggest">Proposer une paire</button>
+            <button class="primary" @onclick="ComputeHedge">Calculer la couverture</button>
+        </div>
+        @foreach (var error in _hedgeErrors)
+        {
+            <div class="alert error">@error</div>
+        }
+
+        @if (_hedge is { } h)
+        {
+            <table class="grid">
+                <thead>
+                    <tr><th class="left">Instrument</th><th>Qté théorique</th><th>Qté arrondie</th><th>Prix exécutable</th><th>Mid</th><th>Exécutable (USD)</th><th>Coût (USD)</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var line in h.Lines)
+                    {
+                        string unit = line.IsFuture ? "USD" : _currency;
+                        <tr>
+                            <td class="left mono">@line.Instrument.Name</td>
+                            <td>@Fmt.Num(line.TheoreticalQuantity, "N4")</td>
+                            <td class="@Fmt.SignClass(line.Quantity)"><b>@Fmt.Signed(line.Quantity, line.IsFuture ? 4 : 1)</b>
+                                @if (line.IsFuture)
+                                {
+                                    <span class="muted small"> (@Fmt.Usd(line.Quantity * line.MidPrice, 0) USD)</span>
+                                }
+                            </td>
+                            <td>@(line.IsFuture ? Fmt.Usd(line.ExecPrice) : Fmt.Coin(line.ExecPrice)) @unit</td>
+                            <td>@(line.IsFuture ? Fmt.Usd(line.MidPrice) : Fmt.Coin(line.MidPrice, 5))</td>
+                            <td>@Fmt.Usd(line.ExecPriceUsd)</td>
+                            <td>@Fmt.Usd(line.CostUsd)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <table class="grid">
+                <thead><tr><th class="left">Grecques</th><th>Delta</th><th>Gamma</th><th>Vega (USD/pt)</th><th>Theta (USD/j)</th></tr></thead>
+                <tbody>
+                    <tr><td class="left">Option sur mesure (q0 = @Fmt.Signed(h.CustomQuantity, 1))</td>@GreekCells(h.CustomGreeks)</tr>
+                    <tr><td class="left">Couverture</td>@GreekCells(h.HedgeGreeks)</tr>
+                    <tr class="total"><td class="left">Position globale (après arrondi)</td>@GreekCells(h.GlobalGreeks)</tr>
+                    <tr class="muted"><td class="left">Position globale avant arrondi</td>@GreekCells(h.GlobalGreeksBeforeRounding)</tr>
+                </tbody>
+            </table>
+            @foreach (var w in h.Warnings)
+            {
+                <div class="alert warn">@w</div>
+            }
+
+            <div class="cards">
+                <div class="card"><div class="label">Coût de couverture</div><div class="value">@Fmt.Usd(h.HedgeCostUsd) USD</div><div class="sub">@Fmt.Coin(h.HedgeCostCoin, 6) @_currency · Σ |q|·|exécutable − mid|</div></div>
+                <div class="card"><div class="label">Déterminant relatif</div><div class="value">@Fmt.Pct(h.RelativeDeterminant * 100)</div><div class="sub">refus sous @Fmt.Pct(HedgeCalculator.MinRelativeDeterminant * 100, 0)</div></div>
+                <div class="card accent">
+                    <div class="label">Prix client</div>
+                    <div class="value">@Fmt.Usd(clientPrice) USD</div>
+                    <div class="sub">théo @Fmt.Usd(v.TheoUsd) @(q0 < 0 ? "+" : "−") coût @Fmt.Usd(h.HedgeCostUsd / Math.Abs(q0)) @(q0 < 0 ? "+" : "−") marge @Fmt.Usd(_marginUsd)</div>
+                </div>
+            </div>
+
+            <div class="book-panel">
+                @if (!_confirm)
+                {
+                    <button class="primary big" @onclick="() => _confirm = true">
+                        Traiter avec le client : @(_clientBuys ? "il achète" : "il vend") @Fmt.Qty(_quantity) @@ @Fmt.Usd(clientPrice) USD + couverture
+                    </button>
+                }
+                else
+                {
+                    <span>Enregistrer l'option sur mesure et sa couverture aux prix exécutables du moment ?</span>
+                    <button class="primary" @onclick="Book">Confirmer</button>
+                    <button @onclick="() => _confirm = false">Annuler</button>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="hint">Le desk ne traite une option sur mesure que s'il peut la couvrir : calculez une couverture pour pouvoir traiter.</p>
+        }
+        @if (_bookMessage != null)
+        {
+            <div class="alert @(_bookOk ? "success" : "error")">@_bookMessage</div>
+        }
+    </div>
+
+    <div class="panel">
+        <h3>Grecques de l'option sur mesure</h3>
+        <table class="grid">
+            <thead><tr><th class="left"></th><th>Delta</th><th>Gamma</th><th>Vega (USD/pt)</th><th>Theta (USD/j)</th></tr></thead>
+            <tbody>
+                <tr><td class="left">Unitaire</td>@GreekCells(v.UnitGreeks)</tr>
+                <tr class="total"><td class="left">Position desk (× @Fmt.Signed(q0, 1))</td>@GreekCells(q0 * v.UnitGreeks)</tr>
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private string _currency = "BTC";
+    private OptionType _type = OptionType.Call;
+    private double? _strike;
+    private DateTime? _expiryDate;
+    private string _clientSide = "buy";
+    private bool _clientBuys => _clientSide == "buy";
+    private double _quantity = 1;
+    private double _marginUsd;
+
+    private CustomOptionSpec? _spec;
+    private CustomOptionValuation? _valuation;
+    private List<string> _errors = new();
+
+    private string _h1Expiry = "", _h1Name = "", _h2Expiry = "", _h2Name = "", _futureName = "";
+    private bool _hedgeActive;
+    private HedgeResult? _hedge;
+    private List<string> _hedgeErrors = new();
+
+    private bool _confirm;
+    private string? _bookMessage;
+    private bool _bookOk;
+
+    // q0 : quantité signée du point de vue du desk (le client achète => le desk vend).
+    private double DeskQuantity => _clientBuys ? -_quantity : _quantity;
+
+    protected override void OnStart() => Defaults();
+
+    protected override void OnTick()
+    {
+        Defaults();
+        Revalue();
+    }
+
+    private void Defaults()
+    {
+        if (Store.Currencies.Count == 0) return;
+        if (!Store.Currencies.Contains(_currency)) _currency = Store.Currencies[0];
+        var expiries = Store.GetOptionExpiries(_currency).Where(e => e > Store.Now).ToList();
+        if (_expiryDate == null && expiries.Count >= 3)
+        {
+            // Par défaut : une date entre deux échéances cotées, strike arrondi au-dessus du future.
+            _expiryDate = expiries[^1] > expiries[2].AddDays(10) ? expiries[2].Date.AddDays(5) : expiries[2].Date;
+            var f = Store.GetForward(_currency, expiries[2]) ?? Store.GetIndex(_currency);
+            if (f.HasValue) _strike = Math.Ceiling(f.Value * 1.03 / 1000) * 1000;
+        }
+    }
+
+    private void Quote()
+    {
+        _bookMessage = null;
+        _confirm = false;
+        _errors = new();
+        if (_strike is not > 0) _errors.Add("Saisissez un strike strictement positif.");
+        if (_expiryDate == null) _errors.Add("Saisissez une échéance.");
+        double step = Store.GetAllOptions(_currency).FirstOrDefault()?.MinTradeAmount ?? 0.1;
+        if (_quantity <= 0 || !Quantities.IsMultipleOf(_quantity, step))
+            _errors.Add($"La quantité doit être un multiple strictement positif de {Fmt.Qty(step)}.");
+        if (_errors.Count > 0)
+        {
+            _valuation = null;
+            return;
+        }
+
+        var expiry = DateTime.SpecifyKind(_expiryDate!.Value.Date.AddHours(8), DateTimeKind.Utc);
+        _spec = new CustomOptionSpec(_currency, _type, _strike!.Value, expiry);
+        _hedge = null;
+        _hedgeActive = false;
+        _hedgeErrors.Clear();
+        Revalue();
+        if (_valuation != null) Suggest();
+    }
+
+    private void Revalue()
+    {
+        if (_spec == null) return;
+        var result = CustomOptionPricer.Value(_spec, Store);
+        _valuation = result.Value;
+        _errors = result.Errors.ToList();
+        if (_hedgeActive) ComputeHedge();
+    }
+
+    private void Suggest()
+    {
+        if (_valuation == null) return;
+        var s = HedgePairSuggester.Suggest(_valuation, Store);
+        if (s == null)
+        {
+            _hedgeErrors = ["Aucune paire de couverture disponible (cotations manquantes)."];
+            return;
+        }
+        _h1Expiry = s.Option1.ExpiryUtc.Ticks.ToString();
+        _h1Name = s.Option1.Name;
+        _h2Expiry = s.Option2.ExpiryUtc.Ticks.ToString();
+        _h2Name = s.Option2.Name;
+        _futureName = s.Future.Name;
+        ComputeHedge();
+    }
+
+    private void ComputeHedge()
+    {
+        _hedgeActive = true;
+        if (_valuation == null) return;
+        var o1 = Store.GetInstrument(_h1Name);
+        var o2 = Store.GetInstrument(_h2Name);
+        var fut = Store.GetInstrument(_futureName);
+        if (o1 == null || o2 == null || fut == null)
+        {
+            _hedge = null;
+            _hedgeErrors = ["Choisissez deux options et un future."];
+            return;
+        }
+        Watch([o1.Name, o2.Name, fut.Name]);
+        var result = HedgeCalculator.Compute(_valuation, DeskQuantity, o1, o2, fut, Store);
+        _hedge = result.Value;
+        _hedgeErrors = result.Errors.ToList();
+    }
+
+    private void Book()
+    {
+        _confirm = false;
+        Revalue();  // prix du moment
+        if (_valuation == null || _hedge == null)
+        {
+            _bookOk = false;
+            _bookMessage = "Cotation ou couverture indisponible : trade refusé.";
+            return;
+        }
+        double q0 = DeskQuantity;
+        double clientPrice = HedgeCalculator.ClientPriceUsd(_valuation, q0, _hedge.HedgeCostUsd, _marginUsd);
+        var trade = Blotter.Add(TradeFactory.FromCustom(_hedge, _valuation, q0, clientPrice, Store));
+        _bookOk = true;
+        _bookMessage = $"Trade {trade.Id} enregistré : {trade.Legs.Count} jambes, prime nette {Fmt.Signed(trade.PremiumCoin, 5)} {trade.Currency}.";
+    }
+
+    private string FirstOption(string expiryKey) =>
+        Store.GetAllOptions(_currency).FirstOrDefault(o => o.ExpiryUtc.Ticks.ToString() == expiryKey && o.OptionType == _type)?.Name ?? "";
+
+    private RenderFragment ExpiryOptions() => __builder =>
+    {
+        foreach (var e in Store.GetOptionExpiries(_currency).Where(e => e > Store.Now))
+        {
+            <option value="@e.Ticks">@Instrument.FormatExpiry(e)</option>
+        }
+    };
+
+    private RenderFragment OptionChoices(string expiryKey) => __builder =>
+    {
+        foreach (var o in Store.GetAllOptions(_currency).Where(o => o.ExpiryUtc.Ticks.ToString() == expiryKey))
+        {
+            var q = Store.GetQuote(o.Name);
+            <option value="@o.Name">@o.Name (@Fmt.Coin(q?.Bid) / @Fmt.Coin(q?.Ask))</option>
+        }
+    };
+
+    private static RenderFragment GreekCells(Greeks g) => __builder =>
+    {
+        <td>@Fmt.Num(g.Delta, "N4")</td>
+        <td>@Fmt.Gamma(g.Gamma)</td>
+        <td>@Fmt.Num(g.Vega, "N2")</td>
+        <td>@Fmt.Num(g.Theta, "N2")</td>
+    };
+}

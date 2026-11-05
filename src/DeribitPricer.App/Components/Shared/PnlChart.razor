@@ -1,0 +1,84 @@
+@* Le graphique du profil de P&L, dessiné en SVG : à l'échéance en trait plein, aujourd'hui en pointillés. *@
+@* Graphique SVG du profil de P&L : à l'échéance (trait plein) et aujourd'hui (pointillés).
+   Toutes les coordonnées sont écrites en culture invariante (point décimal) pour le SVG. *@
+
+<svg class="chart" viewBox="0 0 @N(W) @N(H)" role="img" aria-label="Profil de P&L">
+    @foreach (var y in NiceTicks(_yMin, _yMax, 6))
+    {
+        <g>
+            <line x1="@N(L)" x2="@N(W - R)" y1="@N(Y(y))" y2="@N(Y(y))" class="grid" />
+            <text x="@N(L - 8)" y="@N(Y(y) + 4)" class="tick" text-anchor="end">@Fmt.Num(y, "N0")</text>
+        </g>
+    }
+    @foreach (var x in NiceTicks(_xMin, _xMax, 6))
+    {
+        <g>
+            <line x1="@N(X(x))" x2="@N(X(x))" y1="@N(T)" y2="@N(H - B)" class="grid" />
+            <text x="@N(X(x))" y="@N(H - B + 18)" class="tick" text-anchor="middle">@Fmt.Num(x, "N0")</text>
+        </g>
+    }
+    <line x1="@N(L)" x2="@N(W - R)" y1="@N(Y(0))" y2="@N(Y(0))" class="zero" />
+    @if (Forward >= _xMin && Forward <= _xMax)
+    {
+        <g>
+            <line x1="@N(X(Forward))" x2="@N(X(Forward))" y1="@N(T)" y2="@N(H - B)" class="fwd" />
+            <text x="@N(X(Forward) + 4)" y="@N(H - B - 6)" class="tick">F</text>
+        </g>
+    }
+    @foreach (var be in Breakevens.Where(b => b >= _xMin && b <= _xMax))
+    {
+        <circle cx="@N(X(be))" cy="@N(Y(0))" r="4" class="be" />
+    }
+
+    <polyline points="@Path(p => p.TodayPnlUsd)" class="today" />
+    <polyline points="@Path(p => p.ExpiryPnlUsd)" class="expiry" />
+
+    <g transform="translate(@N(L + 10), @N(T + 6))">
+        <line x1="0" x2="22" y1="6" y2="6" class="expiry" />
+        <text x="28" y="10" class="tick">À l'échéance</text>
+        <line x1="120" x2="142" y1="6" y2="6" class="today" />
+        <text x="148" y="10" class="tick">Aujourd'hui (vol inchangée)</text>
+        <circle cx="330" cy="6" r="4" class="be" />
+        <text x="340" y="10" class="tick">Point mort</text>
+    </g>
+    <text x="@N(W / 2)" y="@N(H - 4)" class="axis" text-anchor="middle">Prix du sous-jacent (USD)</text>
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ProfilePoint> Points { get; set; } = Array.Empty<ProfilePoint>();
+    [Parameter] public double Forward { get; set; }
+    [Parameter] public IReadOnlyList<double> Breakevens { get; set; } = Array.Empty<double>();
+
+    private const double W = 820, H = 340, L = 78, R = 16, T = 14, B = 40;
+    private double _xMin, _xMax = 1, _yMin, _yMax = 1;
+
+    protected override void OnParametersSet()
+    {
+        if (Points.Count == 0) return;
+        _xMin = Points.Min(p => p.Spot);
+        _xMax = Points.Max(p => p.Spot);
+        var ys = Points.SelectMany(p => new[] { p.ExpiryPnlUsd, p.TodayPnlUsd }).Append(0).ToList();
+        _yMin = ys.Min();
+        _yMax = ys.Max();
+        double pad = Math.Max(1, (_yMax - _yMin) * 0.08);
+        _yMin -= pad;
+        _yMax += pad;
+    }
+
+    private double X(double x) => L + (x - _xMin) / (_xMax - _xMin) * (W - L - R);
+    private double Y(double y) => T + (_yMax - y) / (_yMax - _yMin) * (H - T - B);
+    private static string N(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private string Path(Func<ProfilePoint, double> value) =>
+        string.Join(" ", Points.Select(p => $"{N(X(p.Spot))},{N(Y(value(p)))}"));
+
+    private static IEnumerable<double> NiceTicks(double min, double max, int count)
+    {
+        if (max <= min) yield break;
+        double raw = (max - min) / count;
+        double mag = Math.Pow(10, Math.Floor(Math.Log10(raw)));
+        double step = new[] { 1, 2, 2.5, 5, 10 }.Select(m => m * mag).First(s => s >= raw);
+        for (double v = Math.Ceiling(min / step) * step; v <= max; v += step)
+            yield return Math.Abs(v) < step * 1e-9 ? 0 : v;
+    }
+}

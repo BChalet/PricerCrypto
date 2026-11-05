@@ -1,0 +1,406 @@
+@* Onglet Pricer (partie 2) : on compose un spread ou un butterfly, on voit les prix, les vols, les grecques, le profil, et on peut traiter. *@
+@page "/pricer"
+@inherits LivePage
+@inject Blotter Blotter
+
+<PageTitle>Pricer · Pricer Deribit</PageTitle>
+
+<h1>Pricer de structures</h1>
+
+<div class="panel form">
+    <div class="form-grid">
+        <label>Devise
+            <select @bind="_currency" @bind:after="ResetStrikes">
+                @foreach (var c in Store.Currencies)
+                {
+                    <option value="@c">@c</option>
+                }
+            </select>
+        </label>
+        <label>Structure
+            <select @bind="_type" @bind:after="ResetStrikes">
+                <option value="@StructureType.CallSpread">Call spread</option>
+                <option value="@StructureType.PutSpread">Put spread</option>
+                <option value="@StructureType.CallButterfly">Butterfly calls</option>
+                <option value="@StructureType.PutButterfly">Butterfly puts</option>
+            </select>
+        </label>
+        <label>Échéance
+            <select @bind="_expiryKey" @bind:after="ResetStrikes">
+                @foreach (var e in Expiries)
+                {
+                    <option value="@e.Ticks">@Instrument.FormatExpiry(e) — @Fmt.Days(Black76.YearFraction(e, Store.Now))</option>
+                }
+            </select>
+        </label>
+        <label>K1 <input type="number" step="any" list="strikes" @bind="_k1" /></label>
+        <label>K2 <input type="number" step="any" list="strikes" @bind="_k2" /></label>
+        @if (_type.StrikeCount() == 3)
+        {
+            <label>K3 <input type="number" step="any" list="strikes" @bind="_k3" /></label>
+        }
+        <label>Sens
+            <select @bind="_direction">
+                <option value="@TradeDirection.Buy">Achat</option>
+                <option value="@TradeDirection.Sell">Vente</option>
+            </select>
+        </label>
+        <label>Quantité <input type="number" step="any" @bind="_quantity" /></label>
+        <button class="primary" @onclick="Quote">Coter</button>
+    </div>
+    <datalist id="strikes">
+        @if (Expiry is { } exp)
+        {
+            @foreach (var k in Store.GetStrikes(_currency, exp, _type.OptionType()))
+            {
+                <option value="@k.ToString(CultureInfo.InvariantCulture)"></option>
+            }
+        }
+    </datalist>
+    <p class="hint">@_type.Composition(). Vente : signes inversés. Quantité en @_currency (1 contrat = 1 @_currency).</p>
+    @foreach (var error in _errors)
+    {
+        <div class="alert error">@error</div>
+    }
+</div>
+
+@if (_pricing is { } p)
+{
+    var def = p.Definition;
+    <h2>@def.Label · @def.Request.Direction.Label() @Fmt.Qty(def.Request.Quantity)</h2>
+
+    <div class="cards">
+        <div class="card"><div class="label">Future</div><div class="value">@Fmt.Usd(p.Forward)</div><div class="sub">T = @Fmt.Days(p.T) · cotation @Fmt.Time(p.QuoteTime)</div></div>
+        <div class="card"><div class="label">Prix théorique (unité)</div><div class="value">@Fmt.Coin(p.TheoCoinUnit, 5) @_currency</div><div class="sub">@Fmt.Usd(p.TheoUsdUnit) USD · mark @Fmt.Coin(p.MarkCoinUnit, 5)</div></div>
+        <div class="card"><div class="label">Prix exécutable achat</div><div class="value">@Fmt.Coin(p.BuyPriceCoinUnit, 4)</div><div class="sub">@Fmt.Usd(p.BuyPriceCoinUnit * p.Forward) USD</div></div>
+        <div class="card"><div class="label">Prix exécutable vente</div><div class="value">@Fmt.Coin(p.SellPriceCoinUnit, 4)</div><div class="sub">@Fmt.Usd(p.SellPriceCoinUnit * p.Forward) USD</div></div>
+        <div class="card"><div class="label">Fourchette</div><div class="value">@Fmt.Coin(p.SpreadCoinUnit, 4)</div><div class="sub">@Fmt.Usd(p.SpreadCoinUnit * p.Forward) USD</div></div>
+        <div class="card @(p.Tradable ? "" : "warn")">
+            <div class="label">Prime totale (@def.Request.Direction.Label().ToLowerInvariant())</div>
+            @if (p.Tradable)
+            {
+                <div class="value @Fmt.SignClass(-p.PremiumCoin)">@Fmt.Signed(p.PremiumCoin, 5)</div>
+                <div class="sub">@Fmt.Usd(p.PremiumCoin * p.Forward) USD · &gt; 0 payée</div>
+            }
+            else
+            {
+                <div class="value">NON TRAITABLE</div>
+                <div class="sub">@string.Join(" · ", p.NotTradableReasons)</div>
+            }
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Prix des jambes</h3>
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th class="left">Jambe</th><th>Qté signée</th><th>Bid</th><th>Ask</th><th>Mark Deribit</th>
+                    <th>Vol mark</th><th>Théo @_currency</th><th>Théo USD</th><th>Écart théo − mark</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var leg in p.Legs)
+                {
+                    var a = leg.Analytics;
+                    <tr>
+                        <td class="left mono">@leg.Name</td>
+                        <td class="@Fmt.SignClass(leg.SignedQuantity)">@Fmt.Signed(leg.SignedQuantity, 1)</td>
+                        <td>@Fmt.Coin(a?.Quote.Bid)</td>
+                        <td>@Fmt.Coin(a?.Quote.Ask)</td>
+                        <td>@Fmt.Coin(a?.Quote.Mark, 6)</td>
+                        <td>@Fmt.Iv(a?.Quote.MarkIv)</td>
+                        <td>@Fmt.Coin(a?.TheoCoin, 6)</td>
+                        <td>@Fmt.Usd(a?.TheoUsd)</td>
+                        <td class="@(a?.MarkDiffFlag == true ? "flag" : "ok")" title="Signalé au-delà de 0,0001 @_currency">
+                            @Fmt.Signed(a?.MarkDiffCoin, 6) @(a?.MarkDiffFlag == true ? "⚠" : "")
+                        </td>
+                    </tr>
+                }
+                <tr class="total">
+                    <td class="left">Structure (unité)</td><td></td><td></td><td></td>
+                    <td>@Fmt.Coin(p.MarkCoinUnit, 6)</td><td></td>
+                    <td>@Fmt.Coin(p.TheoCoinUnit, 6)</td><td>@Fmt.Usd(p.TheoUsdUnit)</td>
+                    <td>@Fmt.Signed(p.TheoCoinUnit - p.MarkCoinUnit, 6)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="panel">
+        <h3>Vols implicites (%) : notre inversion de Black-76 / Deribit</h3>
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th class="left">Jambe</th>
+                    <th>Bid calc.</th><th>bid_iv</th><th>Écart</th>
+                    <th>Mark calc.</th><th>mark_iv</th><th>Écart</th>
+                    <th>Ask calc.</th><th>ask_iv</th><th>Écart</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var leg in p.Legs)
+                {
+                    var a = leg.Analytics;
+                    <tr>
+                        <td class="left mono">@leg.Name</td>
+                        @VolCells(a?.BidVol)
+                        @VolCells(a?.MarkVol)
+                        @VolCells(a?.AskVol)
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="hint">Écart signalé (⚠) au-delà de 0,1 point de vol. « n/d » : Deribit ne publie bid_iv / ask_iv que dans le ticker temps réel.</p>
+    </div>
+
+    <div class="panel">
+        <h3>Grecques de la position (quantités signées)</h3>
+        <table class="grid">
+            <thead>
+                <tr><th class="left"></th><th>Delta</th><th>Gamma</th><th>Vega (USD/pt)</th><th>Theta (USD/j)</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var leg in p.Legs)
+                {
+                    <tr class="sub-row">
+                        <td class="left mono">@leg.Name × @Fmt.Signed(leg.SignedQuantity, 1)</td>
+                        @GreekCells(leg.Analytics?.Greeks is { } g ? leg.SignedQuantity * g : null)
+                    </tr>
+                }
+                <tr class="total"><td class="left">Structure — notre calcul</td>@GreekCells(p.Greeks)</tr>
+                <tr><td class="left">Structure — Deribit</td>@GreekCells(p.DeribitGreeks)</tr>
+                <tr class="muted"><td class="left">Écart</td>@GreekCells(p.Greeks.HasValue && p.DeribitGreeks.HasValue ? p.Greeks.Value - p.DeribitGreeks.Value : null)</tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="panel">
+        <div class="row-between">
+            <h3>Profil de P&amp;L</h3>
+            <div class="inline-form">
+                <label>de <input type="number" step="any" @bind="_pMin" /> %</label>
+                <label>à <input type="number" step="any" @bind="_pMax" /> %</label>
+                <label>pas <input type="number" step="any" @bind="_pStep" /> %</label>
+                <button @onclick="ToggleProfile">@(_showProfile ? "Masquer" : "Afficher le profil")</button>
+            </div>
+        </div>
+        @if (_profileError != null)
+        {
+            <div class="alert error">@_profileError</div>
+        }
+        @if (_showProfile && _profile is { } prof)
+        {
+            <div class="cards">
+                <div class="card"><div class="label">Prime payée</div><div class="value">@Fmt.Usd(prof.PremiumUsd) USD</div><div class="sub">@Fmt.Signed(prof.PremiumCoin, 5) @_currency @(p.Tradable ? "(exécutable)" : "(théorique)")</div></div>
+                <div class="card"><div class="label">Gain maximal</div><div class="value pos">@(prof.MaxGainUsd.HasValue ? Fmt.Usd(prof.MaxGainUsd) + " USD" : "illimité")</div></div>
+                <div class="card"><div class="label">Perte maximale</div><div class="value neg">@(prof.MaxLossUsd.HasValue ? Fmt.Usd(prof.MaxLossUsd) + " USD" : "illimitée")</div></div>
+                <div class="card"><div class="label">Point(s) mort(s)</div><div class="value">@(prof.Breakevens.Count == 0 ? "aucun" : string.Join(" · ", prof.Breakevens.Select(b => Fmt.Usd(b, 0))))</div></div>
+            </div>
+            <PnlChart Points="prof.Curve" Forward="prof.Forward" Breakevens="prof.Breakevens" />
+            <table class="grid compact">
+                <thead><tr><th>Variation</th><th>Sous-jacent</th><th>P&amp;L échéance (USD)</th><th>P&amp;L échéance (@_currency)</th><th>P&amp;L aujourd'hui (USD)</th></tr></thead>
+                <tbody>
+                    @foreach (var pt in prof.Points)
+                    {
+                        <tr class="@(Math.Abs(pt.ShiftPct) < 1e-9 ? "atm" : "")">
+                            <td>@Fmt.Pct(pt.ShiftPct, 0)</td>
+                            <td>@Fmt.Usd(pt.Spot, 0)</td>
+                            <td class="@Fmt.SignClass(pt.ExpiryPnlUsd)">@Fmt.Usd(pt.ExpiryPnlUsd)</td>
+                            <td class="@Fmt.SignClass(pt.ExpiryPnlCoin)">@Fmt.Coin(pt.ExpiryPnlCoin, 5)</td>
+                            <td class="@Fmt.SignClass(pt.TodayPnlUsd)">@Fmt.Usd(pt.TodayPnlUsd)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <p class="hint">P&amp;L à l'échéance = payoff − prime payée (convertie en USD au future actuel). Aujourd'hui : chaque jambe réévaluée avec Black-76 à vol inchangée. Gain/perte max et points morts calculés exactement (payoff linéaire par morceaux).</p>
+        }
+    </div>
+
+    <div class="panel book-panel">
+        @if (!_confirm)
+        {
+            <button class="primary big" disabled="@(!p.Tradable)" @onclick="() => _confirm = true">
+                Traiter : @def.Request.Direction.Label() @Fmt.Qty(def.Request.Quantity) @@ @Fmt.Coin(p.ExecPriceCoinUnit) @_currency
+            </button>
+        }
+        else
+        {
+            <span>Confirmer @def.Request.Direction.Label().ToLowerInvariant() de @Fmt.Qty(def.Request.Quantity) @def.Label au prix exécutable du moment ?</span>
+            <button class="primary" @onclick="Book">Confirmer</button>
+            <button @onclick="() => _confirm = false">Annuler</button>
+        }
+        @if (_bookMessage != null)
+        {
+            <div class="alert @(_bookOk ? "success" : "error")">@_bookMessage</div>
+        }
+    </div>
+}
+
+@code {
+    private string _currency = "BTC";
+    private StructureType _type = StructureType.CallSpread;
+    private string _expiryKey = "";
+    private double? _k1, _k2, _k3;
+    private TradeDirection _direction = TradeDirection.Buy;
+    private double _quantity = 1;
+
+    private StructureDefinition? _definition;
+    private StructurePricing? _pricing;
+    private List<string> _errors = new();
+
+    private bool _showProfile;
+    private double _pMin = -30, _pMax = 30, _pStep = 5;
+    private PayoffProfile? _profile;
+    private string? _profileError;
+
+    private bool _confirm;
+    private string? _bookMessage;
+    private bool _bookOk;
+
+    private IReadOnlyList<DateTime> Expiries => Store.GetOptionExpiries(_currency).Where(e => e > Store.Now).ToList();
+
+    private DateTime? Expiry
+    {
+        get
+        {
+            var list = Expiries;
+            if (list.Count == 0) return null;
+            var match = list.FirstOrDefault(e => e.Ticks.ToString() == _expiryKey);
+            return match == default ? null : match;
+        }
+    }
+
+    protected override void OnStart() => EnsureDefaults();
+
+    protected override void OnTick()
+    {
+        EnsureDefaults();
+        Reprice();
+    }
+
+    // Choisit une devise, une échéance (> 2 jours si possible) et des strikes autour de la monnaie
+    private void EnsureDefaults()
+    {
+        if (Store.Currencies.Count == 0) return;
+        if (!Store.Currencies.Contains(_currency)) _currency = Store.Currencies[0];
+        if (Expiry == null && Expiries.Count > 0)
+        {
+            var pick = Expiries.FirstOrDefault(e => Black76.YearFraction(e, Store.Now) > 2.0 / 365);
+            _expiryKey = (pick == default ? Expiries[0] : pick).Ticks.ToString();
+            ResetStrikes();
+        }
+    }
+
+    private void ResetStrikes()
+    {
+        if (Expiry is not { } expiry) { EnsureDefaults(); return; }
+        var strikes = Store.GetStrikes(_currency, expiry, _type.OptionType());
+        var forward = Store.GetForward(_currency, expiry);
+        if (strikes.Count < 3 || forward is null) return;
+        int atm = strikes.Select((k, i) => (k, i)).MinBy(x => Math.Abs(x.k - forward.Value)).i;
+        int start = Math.Clamp(atm - 1, 0, strikes.Count - 3);
+        if (_type is StructureType.CallSpread) start = Math.Clamp(atm, 0, strikes.Count - 2);
+        _k1 = strikes[start];
+        _k2 = strikes[start + 1];
+        _k3 = _type.StrikeCount() == 3 ? strikes[Math.Min(start + 2, strikes.Count - 1)] : null;
+    }
+
+    private void Quote()
+    {
+        _bookMessage = null;
+        _confirm = false;
+        if (Expiry is not { } expiry)
+        {
+            _errors = ["Choisissez une échéance."];
+            return;
+        }
+        var strikes = new[] { _k1, _k2, _k3 }.Take(_type.StrikeCount()).Select(k => k ?? 0).ToList();
+        var result = StructureBuilder.Build(new StructureRequest(_currency, _type, expiry, strikes, _direction, _quantity), Store);
+        _errors = result.Errors.ToList();
+        _definition = result.Value;
+        _pricing = null;
+        _profile = null;
+        if (_definition != null)
+        {
+            Watch(_definition.Legs.Select(l => l.Instrument.Name));
+            Reprice();
+        }
+    }
+
+    private void Reprice()
+    {
+        if (_definition == null) return;
+        _pricing = StructurePricer.Price(_definition, Store);
+        if (_showProfile) ComputeProfile();
+    }
+
+    private void ToggleProfile()
+    {
+        _showProfile = !_showProfile;
+        if (_showProfile) ComputeProfile();
+    }
+
+    private void ComputeProfile()
+    {
+        _profileError = null;
+        if (_pricing is not { Complete: true } p || p.Legs.Any(l => l.Analytics?.Vol == null))
+        {
+            _profile = null;
+            _profileError = "Profil indisponible : cotation incomplète.";
+            return;
+        }
+        var legs = p.Legs.Select(l => new ProfileLeg(l.Leg.Instrument.OptionType!.Value, l.Leg.Instrument.Strike,
+            l.SignedQuantity, l.Analytics!.Vol!.Value)).ToList();
+        double premium = p.PremiumCoin ?? (p.TheoCoinUnit!.Value * p.Definition.Request.Quantity * p.Definition.DirectionSign);
+        try
+        {
+            _profile = PayoffProfileCalculator.Compute(legs, p.Forward, p.T, premium, _pMin, _pMax, _pStep);
+        }
+        catch (ArgumentException ex)
+        {
+            _profile = null;
+            _profileError = ex.Message;
+        }
+    }
+
+    private void Book()
+    {
+        _confirm = false;
+        if (_definition == null) return;
+        // Recote à l'instant du clic : on traite au prix exécutable affiché à ce moment.
+        _pricing = StructurePricer.Price(_definition, Store);
+        var result = TradeFactory.FromStructure(_pricing, Store);
+        if (result.IsSuccess)
+        {
+            var trade = Blotter.Add(result.Value!);
+            _bookOk = true;
+            _bookMessage = $"Trade {trade.Id} enregistré : prime {Fmt.Signed(trade.PremiumCoin, 5)} {trade.Currency}.";
+        }
+        else
+        {
+            _bookOk = false;
+            _bookMessage = string.Join(" ", result.Errors);
+        }
+    }
+
+    private static RenderFragment VolCells(VolComparison? v) => __builder =>
+    {
+        if (v == null)
+        {
+            <td>—</td><td>—</td><td>—</td>
+            return;
+        }
+        <td title="@v.Error">@(v.ComputedPct.HasValue ? Fmt.Iv(v.ComputedPct) : (v.Error?.StartsWith("incalculable") == true ? "incalculable" : "—"))</td>
+        <td>@(v.DeribitPct.HasValue ? Fmt.Iv(v.DeribitPct) : "n/d")</td>
+        <td class="@(v.Flag ? "flag" : "ok")">@(v.DiffPoints.HasValue ? Fmt.Signed(v.DiffPoints, 2) + (v.Flag ? " ⚠" : "") : "")</td>
+    };
+
+    private static RenderFragment GreekCells(Greeks? g) => __builder =>
+    {
+        <td>@Fmt.Num(g?.Delta, "N4")</td>
+        <td>@Fmt.Gamma(g?.Gamma)</td>
+        <td>@Fmt.Num(g?.Vega, "N2")</td>
+        <td>@Fmt.Num(g?.Theta, "N2")</td>
+    };
+}

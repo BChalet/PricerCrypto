@@ -1,0 +1,141 @@
+@* Onglet Marché (partie 1) : on choisit une devise et une échéance, et on voit toutes les options avec bid, ask, mark et vol. *@
+@page "/"
+@inherits LivePage
+
+<PageTitle>Marché · Pricer Deribit</PageTitle>
+
+<h1>Référentiel des options</h1>
+
+<div class="toolbar">
+    <label>Devise
+        <select @bind="_currency" @bind:after="OnCurrencyChanged">
+            @foreach (var c in Store.Currencies)
+            {
+                <option value="@c">@c</option>
+            }
+        </select>
+    </label>
+    <label>Échéance
+        <select @bind="_expiryKey">
+            @foreach (var e in Expiries)
+            {
+                <option value="@e.Ticks">@Instrument.FormatExpiry(e) — @Fmt.Days(Black76.YearFraction(e, Store.Now))</option>
+            }
+        </select>
+    </label>
+    <label>Strikes autour du future
+        <select @bind="_range">
+            <option value="10">± 10 %</option>
+            <option value="25">± 25 %</option>
+            <option value="50">± 50 %</option>
+            <option value="1000">Tous</option>
+        </select>
+    </label>
+</div>
+
+@if (Store.Currencies.Count == 0)
+{
+    <div class="panel muted">Chargement des référentiels... (voir l'onglet Flux en cas de problème)</div>
+}
+else if (Expiry is { } expiry)
+{
+    var forward = Store.GetForward(_currency, expiry);
+    var rows = Rows(expiry, forward).ToList();
+    var atm = forward.HasValue && rows.Count > 0 ? rows.MinBy(r => Math.Abs(r.Strike - forward.Value))!.Strike : (double?)null;
+
+    <div class="cards">
+        <div class="card"><div class="label">Future @Instrument.FormatExpiry(expiry)</div><div class="value">@Fmt.Usd(forward)</div></div>
+        <div class="card"><div class="label">Indice @_currency</div><div class="value">@Fmt.Usd(Store.GetIndex(_currency))</div></div>
+        <div class="card"><div class="label">Échéance</div><div class="value">@Fmt.DateTime(expiry)</div><div class="sub">T = @Fmt.Days(Black76.YearFraction(expiry, Store.Now))</div></div>
+        <div class="card"><div class="label">Options cotées</div><div class="value">@Store.GetOptions(_currency, expiry).Count</div></div>
+    </div>
+
+    <div class="panel">
+        <table class="grid chain">
+            <thead>
+                <tr><th colspan="5" class="calls">CALLS</th><th></th><th colspan="5" class="puts">PUTS</th></tr>
+                <tr>
+                    <th>Bid</th><th>Ask</th><th>Mark</th><th>IV mark</th><th>Δ</th>
+                    <th class="strike">Strike</th>
+                    <th>Bid</th><th>Ask</th><th>Mark</th><th>IV mark</th><th>Δ</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    <tr class="@(row.Strike == atm ? "atm" : "")">
+                        @CallPutCells(row.Call, forward.HasValue && row.Strike < forward)
+                        <td class="strike">@Fmt.Strike(row.Strike)</td>
+                        @CallPutCells(row.Put, forward.HasValue && row.Strike > forward)
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="hint">Prix en @_currency (options inverses). Survolez un prix pour sa valeur en USD. Ligne surlignée : strike le plus proche du future. Zone grisée : dans la monnaie.</p>
+    </div>
+}
+
+@code {
+    private string _currency = "BTC";
+    private string _expiryKey = "";
+    private string _range = "25";
+
+    private sealed record ChainRow(double Strike, Instrument? Call, Instrument? Put);
+
+    private IReadOnlyList<DateTime> Expiries => Store.GetOptionExpiries(_currency).Where(e => e > Store.Now).ToList();
+
+    private DateTime? Expiry
+    {
+        get
+        {
+            var list = Expiries;
+            if (list.Count == 0) return null;
+            var match = list.FirstOrDefault(e => e.Ticks.ToString() == _expiryKey);
+            return match == default ? list[0] : match;
+        }
+    }
+
+    protected override void OnStart() => EnsureSelection();
+
+    protected override void OnTick() => EnsureSelection();
+
+    // Sélectionne une devise disponible et, par défaut, la première échéance à plus de 2 jours.
+    private void EnsureSelection()
+    {
+        if (Store.Currencies.Count > 0 && !Store.Currencies.Contains(_currency)) _currency = Store.Currencies[0];
+        var list = Expiries;
+        if (list.Count > 0 && !list.Any(e => e.Ticks.ToString() == _expiryKey))
+        {
+            var pick = list.FirstOrDefault(e => Black76.YearFraction(e, Store.Now) > 2.0 / 365);
+            _expiryKey = (pick == default ? list[0] : pick).Ticks.ToString();
+        }
+    }
+
+    private void OnCurrencyChanged() => _expiryKey = "";
+
+    private IEnumerable<ChainRow> Rows(DateTime expiry, double? forward)
+    {
+        double range = double.Parse(_range, CultureInfo.InvariantCulture) / 100;
+        return Store.GetOptions(_currency, expiry)
+            .GroupBy(o => o.Strike)
+            .Where(g => !forward.HasValue || Math.Abs(g.Key / forward.Value - 1) <= range)
+            .OrderBy(g => g.Key)
+            .Select(g => new ChainRow(g.Key, g.FirstOrDefault(o => o.OptionType == OptionType.Call),
+                g.FirstOrDefault(o => o.OptionType == OptionType.Put)));
+    }
+
+    private RenderFragment CallPutCells(Instrument? option, bool inTheMoney) => __builder =>
+    {
+        var q = option != null ? Store.GetQuote(option.Name) : null;
+        var a = option != null ? OptionAnalytics.Compute(option, q) : null;
+        string css = inTheMoney ? "itm" : "";
+        double f = q?.UnderlyingPrice ?? 0;
+        <td class="@css" title="@UsdTitle(q?.Bid, f)">@Fmt.Coin(q?.Bid)</td>
+        <td class="@css" title="@UsdTitle(q?.Ask, f)">@Fmt.Coin(q?.Ask)</td>
+        <td class="@css mark" title="@UsdTitle(q?.Mark, f)">@Fmt.Coin(q?.Mark)</td>
+        <td class="@css">@Fmt.Iv(q?.MarkIv)</td>
+        <td class="@css muted">@Fmt.Num(a?.Greeks?.Delta, "0.00")</td>
+    };
+
+    private static string UsdTitle(double? coin, double f) => coin.HasValue && f > 0 ? $"{Fmt.Usd(coin * f)} USD" : "";
+}

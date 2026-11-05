@@ -1,0 +1,31 @@
+@* La bande sous les onglets : badge LIVE ou REJEU, état de la connexion, indice et horloge du marché. *@
+@inherits LivePage
+
+<div class="statusbar">
+    @if (Status.Mode == "Replay")
+    {
+        <span class="badge replay" title="@Status.ReplayFile">REJEU ×@Fmt.Num(Status.ReplaySpeed, "0.##")</span>
+        <span class="progress"><span style="width:@((Status.ReplayProgress * 100).ToString("0", CultureInfo.InvariantCulture))%"></span></span>
+    }
+    else
+    {
+        <span class="badge live">LIVE</span>
+    }
+    @if (Status.Recording)
+    {
+        <span class="badge rec" title="@Status.RecordFile">● REC</span>
+    }
+    <span class="dot @(Status.Connected ? "ok" : "ko")"></span>
+    <span class="muted">@Status.State</span>
+    <span class="sep"></span>
+    @foreach (var currency in Store.Currencies)
+    {
+        <span class="index">@currency <b>@Fmt.Usd(Store.GetIndex(currency))</b></span>
+    }
+    <span class="clock" title="Horloge de marché (UTC)">@Fmt.DateTime(Store.Now) UTC</span>
+    <a href="flux" class="muted small">@Status.EventCount msg</a>
+</div>
+
+@code {
+    private FeedStatus Status => Store.Status;
+}

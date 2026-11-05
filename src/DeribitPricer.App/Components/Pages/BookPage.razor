@@ -1,0 +1,168 @@
+@* Onglet Book (partie 3) : les positions ouvertes, les valeurs, le P&L, les grecques par échéance et les options réglées. *@
+@page "/book"
+@inherits LivePage
+@inject BookService BookService
+
+<PageTitle>Book · Pricer Deribit</PageTitle>
+
+<div class="row-between">
+    <h1>Book</h1>
+    <div class="actions">
+        <label class="check"><input type="checkbox" @bind="_showClosed" /> structures fermées</label>
+        <a class="button" href="export/book.csv" download>Export CSV</a>
+        <a class="button" href="export/book.xlsx" download>Export Excel</a>
+    </div>
+</div>
+
+@if (_book is { } book)
+{
+    @if (book.Structures.Count == 0)
+    {
+        <div class="panel muted">Book vide.</div>
+    }
+
+    @foreach (var t in book.Totals)
+    {
+        <div class="cards">
+            <div class="card"><div class="label">Valeur du book au mark (@t.Currency)</div><div class="value">@Fmt.Coin(t.MarkValueCoin, 5)</div><div class="sub">théo @Fmt.Coin(t.TheoValueCoin, 5)</div></div>
+            <div class="card"><div class="label">P&amp;L total (mark)</div><div class="value @Fmt.SignClass(t.PnlMarkCoin)">@Fmt.Signed(t.PnlMarkCoin, 5) @t.Currency</div><div class="sub">@Fmt.Usd(t.PnlMarkUsd) USD (indice @Fmt.Usd(t.Index, 0))</div></div>
+            <div class="card"><div class="label">P&amp;L total (théo)</div><div class="value @Fmt.SignClass(t.PnlTheoCoin)">@Fmt.Signed(t.PnlTheoCoin, 5) @t.Currency</div><div class="sub">@Fmt.Usd(t.PnlTheoUsd) USD</div></div>
+            <div class="card"><div class="label">dont réalisé</div><div class="value @Fmt.SignClass(t.RealizedCoin)">@Fmt.Signed(t.RealizedCoin, 5)</div><div class="sub">@Fmt.Usd(t.RealizedUsd) USD · latent @Fmt.Signed(t.UnrealizedMarkCoin, 5)</div></div>
+            <div class="card"><div class="label">Grecques @t.Currency</div><div class="value small-value">Δ @Fmt.Num(t.Greeks.Delta, "N3") · V @Fmt.Num(t.Greeks.Vega, "N1")</div><div class="sub">Γ @Fmt.Gamma(t.Greeks.Gamma) · Θ @Fmt.Num(t.Greeks.Theta, "N1")</div></div>
+        </div>
+    }
+
+    @if (book.Structures.Count > 0)
+    {
+        <div class="panel">
+            <h3>Structures</h3>
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th class="left">Trade</th><th class="left">Structure</th><th>Ouverte</th><th>Valeur mark</th><th>Valeur théo</th>
+                        <th>P&amp;L mark</th><th>P&amp;L USD</th><th>P&amp;L théo</th><th>Réalisé</th><th>Delta</th><th>Gamma</th><th>Vega</th><th>Theta</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in book.Structures.Where(s => _showClosed || s.IsOpen).OrderBy(s => s.Original.Id))
+                    {
+                        <tr class="@(s.IsOpen ? "" : "closed")">
+                            <td class="left mono"><b>@s.Original.Id</b></td>
+                            <td class="left">@s.Original.Description <span class="muted small">(@s.Original.Direction.Label().ToLowerInvariant())</span></td>
+                            <td>@Fmt.Qty(s.OpenQuantity)</td>
+                            <td>@Fmt.Coin(s.MarkValueCoin, 5)</td>
+                            <td>@Fmt.Coin(s.TheoValueCoin, 5)</td>
+                            <td class="@Fmt.SignClass(s.PnlMarkCoin)">@Fmt.Signed(s.PnlMarkCoin, 5)</td>
+                            <td class="@Fmt.SignClass(s.PnlMarkUsd)">@Fmt.Usd(s.PnlMarkUsd)</td>
+                            <td class="@Fmt.SignClass(s.PnlTheoCoin)">@Fmt.Signed(s.PnlTheoCoin, 5)</td>
+                            <td class="@Fmt.SignClass(s.RealizedCoin)">@Fmt.Signed(s.RealizedCoin, 5)</td>
+                            <td>@Fmt.Num(s.Greeks.Delta, "N4")</td>
+                            <td>@Fmt.Gamma(s.Greeks.Gamma)</td>
+                            <td>@Fmt.Num(s.Greeks.Vega, "N2")</td>
+                            <td>@Fmt.Num(s.Greeks.Theta, "N2")</td>
+                            <td><button class="small" @onclick="() => Toggle(s.Original.Id)">@(_expanded.Contains(s.Original.Id) ? "−" : "+")</button></td>
+                        </tr>
+                        @if (_expanded.Contains(s.Original.Id))
+                        {
+                            <tr class="detail">
+                                <td colspan="14">
+                                    <table class="grid inner">
+                                        <thead><tr><th class="left">Instrument</th><th>Statut</th><th>Position</th><th>Prix de revient</th><th>Mark</th><th>Théo</th><th>Latent (mark)</th><th>Réalisé</th><th>Delta</th><th>Vega</th><th class="left">Commentaire</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var l in s.Legs)
+                                            {
+                                                bool fut = l.Kind == LegKind.Future;
+                                                <tr>
+                                                    <td class="left mono">@l.Instrument</td>
+                                                    <td>@BookExporter.StatusLabel(l.Status)</td>
+                                                    <td>@Fmt.Signed(l.OpenQuantity, fut ? 4 : 1)</td>
+                                                    <td>@(fut ? Fmt.Usd(l.AverageCost) : Fmt.Coin(l.AverageCost, 6))</td>
+                                                    <td>@(fut ? Fmt.Usd(l.MarkPrice) : Fmt.Coin(l.MarkPrice, 6))</td>
+                                                    <td>@(fut ? Fmt.Usd(l.TheoPrice) : Fmt.Coin(l.TheoPrice, 6))</td>
+                                                    <td class="@Fmt.SignClass(l.UnrealizedMarkCoin)">@Fmt.Signed(l.UnrealizedMarkCoin, 5)</td>
+                                                    <td class="@Fmt.SignClass(l.RealizedCoin)">@Fmt.Signed(l.RealizedCoin, 5)</td>
+                                                    <td>@Fmt.Num(l.Greeks.Delta, "N4")</td>
+                                                    <td>@Fmt.Num(l.Greeks.Vega, "N2")</td>
+                                                    <td class="left muted small">@l.Note</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+            <p class="hint">Valeurs et P&amp;L en crypto ; P&amp;L USD converti à l'indice. Un future (couverture) est suivi en USD et converti à l'indice. Option sur mesure : mark = prix théorique interpolé.</p>
+        </div>
+
+        <div class="panel">
+            <h3>Grecques par échéance</h3>
+            <table class="grid">
+                <thead><tr><th class="left">Devise</th><th class="left">Échéance</th><th>Delta</th><th>Gamma</th><th>Vega (USD/pt)</th><th>Theta (USD/j)</th></tr></thead>
+                <tbody>
+                    @foreach (var e in book.GreeksByExpiry)
+                    {
+                        <tr>
+                            <td class="left">@e.Currency</td>
+                            <td class="left">@(e.IsPerpetual ? "Perpétuel" : Instrument.FormatExpiry(e.Expiry))</td>
+                            <td>@Fmt.Num(e.Greeks.Delta, "N4")</td>
+                            <td>@Fmt.Gamma(e.Greeks.Gamma)</td>
+                            <td>@Fmt.Num(e.Greeks.Vega, "N2")</td>
+                            <td>@Fmt.Num(e.Greeks.Theta, "N2")</td>
+                        </tr>
+                    }
+                    @foreach (var t in book.Totals)
+                    {
+                        <tr class="total">
+                            <td class="left">@t.Currency</td><td class="left">Total book</td>
+                            <td>@Fmt.Num(t.Greeks.Delta, "N4")</td>
+                            <td>@Fmt.Gamma(t.Greeks.Gamma)</td>
+                            <td>@Fmt.Num(t.Greeks.Vega, "N2")</td>
+                            <td>@Fmt.Num(t.Greeks.Theta, "N2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (book.SettledLegs.Count > 0)
+        {
+            <div class="panel">
+                <h3>Options échues et réglées</h3>
+                <table class="grid">
+                    <thead><tr><th class="left">Trade</th><th class="left">Instrument</th><th>Échéance</th><th>Prix de règlement</th><th>Payoff</th><th>P&amp;L réalisé</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in book.SettledLegs)
+                        {
+                            <tr>
+                                <td class="left mono">@l.GroupId</td>
+                                <td class="left mono">@l.Instrument</td>
+                                <td>@Fmt.DateTime(l.Expiry)</td>
+                                <td>@Fmt.Usd(l.SettlementPrice)</td>
+                                <td>@(l.Kind == LegKind.Future ? Fmt.Usd(l.MarkPrice) : Fmt.Coin(l.MarkPrice, 6))</td>
+                                <td class="@Fmt.SignClass(l.RealizedCoin)">@Fmt.Signed(l.RealizedCoin, 5)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="hint">Payoff d'une option en crypto = payoff USD / prix de règlement Deribit de l'échéance. Les montants réglés restent dans le P&amp;L réalisé.</p>
+            </div>
+        }
+    }
+}
+
+@code {
+    private BookSnapshot? _book;
+    private bool _showClosed = true;
+    private readonly HashSet<string> _expanded = new();
+
+    protected override void OnStart() => _book = BookService.Compute();
+    protected override void OnTick() => _book = BookService.Compute();
+
+    private void Toggle(string id)
+    {
+        if (!_expanded.Remove(id)) _expanded.Add(id);
+    }
+}

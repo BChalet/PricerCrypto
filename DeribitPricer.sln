@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{83696225-761D-4549-A778-8B325D7A6581}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.Core", "src\DeribitPricer.Core\DeribitPricer.Core.csproj", "{8CE03960-7FD8-4672-B885-BF0DC2810624}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.App", "src\DeribitPricer.App\DeribitPricer.App.csproj", "{C2F00081-59F5-43FD-B997-733B5E6432FA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C5BFEF96-1EC3-4F84-BCD8-17E123A7EC31}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.Tests", "tests\DeribitPricer.Tests\DeribitPricer.Tests.csproj", "{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{D3740475-BE6F-4881-851E-7C3BD6586403}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeribitPricer.SampleGenerator", "tools\DeribitPricer.SampleGenerator\DeribitPricer.SampleGenerator.csproj", "{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8CE03960-7FD8-4672-B885-BF0DC2810624}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8CE03960-7FD8-4672-B885-BF0DC2810624}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8CE03960-7FD8-4672-B885-BF0DC2810624}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8CE03960-7FD8-4672-B885-BF0DC2810624}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2F00081-59F5-43FD-B997-733B5E6432FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2F00081-59F5-43FD-B997-733B5E6432FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2F00081-59F5-43FD-B997-733B5E6432FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2F00081-59F5-43FD-B997-733B5E6432FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{8CE03960-7FD8-4672-B885-BF0DC2810624} = {83696225-761D-4549-A778-8B325D7A6581}
+		{C2F00081-59F5-43FD-B997-733B5E6432FA} = {83696225-761D-4549-A778-8B325D7A6581}
+		{94BAD39B-1DB5-485F-8B38-FA4EA0A9958E} = {C5BFEF96-1EC3-4F84-BCD8-17E123A7EC31}
+		{B0E6FE5D-9567-4B09-A020-C47F355A0CEA} = {D3740475-BE6F-4881-851E-7C3BD6586403}
+	EndGlobalSection
+EndGlobal

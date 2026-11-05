@@ -1,0 +1,24 @@
+@* La page HTML de base dans laquelle tout le reste s'affiche. *@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>Pricer Deribit</title>
+    <link rel="stylesheet" href="app.css" />
+    <HeadOutlet @rendermode="RenderModeServer" />
+</head>
+
+<body>
+    <Routes @rendermode="RenderModeServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>
+
+@code {
+    // Rendu interactif côté serveur, sans pré-rendu (les écrans démarrent directement en temps réel).
+    private static readonly IComponentRenderMode RenderModeServer = new InteractiveServerRenderMode(prerender: false);
+}

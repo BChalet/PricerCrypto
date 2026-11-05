@@ -1,0 +1,48 @@
+@* Onglet Flux : le mode en cours, la config du flux et le journal des connexions et des erreurs. *@
+@page "/flux"
+@inherits LivePage
+
+<PageTitle>Flux · Pricer Deribit</PageTitle>
+
+<h1>Flux de données</h1>
+
+<div class="cards">
+    <div class="card"><div class="label">Mode</div><div class="value">@(Opt.IsReplay ? "Rejeu" : "Live")</div><div class="sub">MarketData:Mode</div></div>
+    <div class="card"><div class="label">État</div><div class="value small-value">@Store.Status.State</div></div>
+    <div class="card"><div class="label">Messages reçus</div><div class="value">@Store.Status.EventCount</div><div class="sub">dernier : @(Store.LastEventUtc is { } t ? Fmt.DateTime(t) : "—")</div></div>
+    <div class="card"><div class="label">Horloge de marché</div><div class="value small-value">@Fmt.DateTime(Store.Now) UTC</div><div class="sub">@(Store.UseWallClock ? "heure système" : "horodatage du rejeu")</div></div>
+</div>
+
+<div class="panel">
+    <h3>Configuration (appsettings.json, section MarketData)</h3>
+    <table class="grid kv">
+        <tbody>
+            <tr><td class="left">Devises</td><td class="left">@string.Join(", ", Opt.Currencies)</td></tr>
+            @if (Opt.IsReplay)
+            {
+                <tr><td class="left">Fichier rejoué</td><td class="left mono">@Store.Status.ReplayFile</td></tr>
+                <tr><td class="left">Vitesse</td><td class="left">× @Fmt.Num(Opt.ReplaySpeed, "0.##") (@Fmt.Pct(Store.Status.ReplayProgress * 100, 0) lu)</td></tr>
+            }
+            else
+            {
+                <tr><td class="left">REST / WebSocket</td><td class="left mono">@Opt.RestBaseUrl · @Opt.WebSocketUrl</td></tr>
+                <tr><td class="left">Limite de fréquence</td><td class="left">@Fmt.Num(Opt.MaxRequestsPerSecond, "0.##") requêtes/s (rafale @Opt.MaxBurst)</td></tr>
+                <tr><td class="left">Résumé des options</td><td class="left">toutes les @Opt.SummaryPollSeconds s · référentiels toutes les @Opt.ReferenceRefreshMinutes min</td></tr>
+                <tr><td class="left">Enregistrement</td><td class="left mono">@(Store.Status.Recording ? Store.Status.RecordFile : "désactivé (MarketData:Record)")</td></tr>
+            }
+        </tbody>
+    </table>
+    <p class="hint">
+        Changer de mode sans toucher au code : modifier <code>MarketData:Mode</code> (Live / Replay) dans appsettings.json,
+        ou lancer <code>dotnet run --launch-profile "Rejeu"</code>. Vitesse du rejeu : <code>MarketData:ReplaySpeed</code>.
+    </p>
+</div>
+
+<div class="panel">
+    <h3>Journal</h3>
+    <pre class="log">@string.Join("\n", Store.Status.Messages)</pre>
+</div>
+
+@code {
+    private MarketDataOptions Opt => Market.Options;
+}

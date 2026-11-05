@@ -1,0 +1,22 @@
+@* Le cadre commun à toutes les pages : la barre d'onglets en haut et la barre de statut. *@
+@inherits LayoutComponentBase
+
+<header class="topbar">
+    <div class="brand">Δ <span>Pricer Deribit</span></div>
+    <nav>
+        <NavLink href="" Match="NavLinkMatch.All">Marché</NavLink>
+        <NavLink href="pricer">Pricer</NavLink>
+        <NavLink href="sur-mesure">Sur mesure</NavLink>
+        <NavLink href="blotter">Blotter</NavLink>
+        <NavLink href="book">Book</NavLink>
+        <NavLink href="flux">Flux</NavLink>
+    </nav>
+</header>
+<StatusBar />
+<main>
+    @Body
+</main>
+
+<div id="blazor-error-ui">
+    Erreur inattendue. <a href="" class="reload">Recharger</a>
+</div>

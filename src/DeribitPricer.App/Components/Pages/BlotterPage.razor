@@ -1,0 +1,158 @@
+@* Onglet Blotter (partie 3) : la liste des trades, le détail des jambes, le débouclage et les exports. *@
+@page "/blotter"
+@inherits LivePage
+@inject Blotter Blotter
+
+<PageTitle>Blotter · Pricer Deribit</PageTitle>
+
+<div class="row-between">
+    <h1>Blotter</h1>
+    <div class="actions">
+        <a class="button" href="export/blotter.csv" download>Export CSV</a>
+        <a class="button" href="export/book.xlsx" download>Export Excel</a>
+        @if (Market.Options.IsReplay)
+        {
+            <button class="danger" @onclick="() => Blotter.Clear()">Vider (rejeu)</button>
+        }
+    </div>
+</div>
+
+@if (Blotter.Trades.Count == 0)
+{
+    <div class="panel muted">Aucun trade. Traitez une structure depuis le Pricer ou une option sur mesure.</div>
+}
+else
+{
+    <div class="panel">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th class="left">Trade</th><th class="left">Horodatage (UTC)</th><th class="left">Structure</th><th>Sens</th>
+                    <th>Quantité</th><th>Ouverte</th><th>Prime (crypto)</th><th>Prime (USD)</th><th class="left">Lien</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Blotter.Trades.OrderByDescending(t => t.TimestampUtc).ThenByDescending(t => t.Id))
+                {
+                    var open = t.IsUnwind ? (double?)null : Blotter.OpenQuantity(t.Id);
+                    <tr class="@(t.IsUnwind ? "unwind" : "")">
+                        <td class="left mono"><b>@t.Id</b></td>
+                        <td class="left">@Fmt.DateTime(t.TimestampUtc)</td>
+                        <td class="left">@t.Description</td>
+                        <td>@t.Direction.Label()</td>
+                        <td>@Fmt.Qty(t.Quantity)</td>
+                        <td>@Fmt.Qty(open)</td>
+                        <td class="@Fmt.SignClass(-t.PremiumCoin)">@Fmt.Signed(t.PremiumCoin, 5) @t.Currency</td>
+                        <td>@Fmt.Usd(t.PremiumCoin * t.IndexAtTrade)</td>
+                        <td class="left mono">@(t.ParentTradeId != null ? "↳ " + t.ParentTradeId : "")</td>
+                        <td class="right">
+                            <button class="small" @onclick="() => Toggle(t.Id)">@(_expanded.Contains(t.Id) ? "Masquer" : "Jambes")</button>
+                            @if (open > 1e-9)
+                            {
+                                <button class="small" @onclick="() => StartUnwind(t, open.Value)">Déboucler</button>
+                            }
+                        </td>
+                    </tr>
+                    @if (_expanded.Contains(t.Id))
+                    {
+                        <tr class="detail">
+                            <td colspan="10">
+                                <table class="grid inner">
+                                    <thead><tr><th class="left">Instrument</th><th>Qté signée</th><th>Prix d'exécution</th><th>Future au trade</th><th>Vol au trade</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var l in t.Legs)
+                                        {
+                                            <tr>
+                                                <td class="left mono">@l.Instrument</td>
+                                                <td class="@Fmt.SignClass(l.SignedQuantity)">@Fmt.Signed(l.SignedQuantity, l.Kind == LegKind.Future ? 4 : 1)</td>
+                                                <td>@(l.Kind == LegKind.Future ? Fmt.Usd(l.ExecutionPrice) + " USD" : Fmt.Coin(l.ExecutionPrice, 6) + " " + t.Currency)</td>
+                                                <td>@Fmt.Usd(l.Forward)</td>
+                                                <td>@(l.Kind == LegKind.Future ? "" : Fmt.Pct(l.Vol * 100))</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                                @if (t.ClientPriceUsd.HasValue)
+                                {
+                                    <p class="hint">Prix client : @Fmt.Usd(t.ClientPriceUsd) USD par option.</p>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (_unwindTrade?.Id == t.Id)
+                    {
+                        <tr class="detail">
+                            <td colspan="10">
+                                <div class="inline-form">
+                                    <b>Débouclage de @t.Id</b>
+                                    <label>Quantité <input type="number" step="any" @bind="_unwindQuantity" /></label>
+                                    <span class="muted">sur @Fmt.Qty(open) ouverte(s)</span>
+                                    @if (_unwindPreview?.Value is { } preview)
+                                    {
+                                        <span>Prime au prix exécutable du moment : <b class="@Fmt.SignClass(-preview.PremiumCoin)">@Fmt.Signed(preview.PremiumCoin, 5) @t.Currency</b></span>
+                                        <button class="primary" @onclick="ConfirmUnwind">Confirmer</button>
+                                    }
+                                    <button @onclick="() => _unwindTrade = null">Annuler</button>
+                                </div>
+                                @foreach (var e in _unwindPreview?.Errors ?? Array.Empty<string>())
+                                {
+                                    <div class="alert error">@e</div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+        <p class="hint">Prime &gt; 0 : payée par le desk ; &lt; 0 : reçue. Un débouclage est un nouveau trade lié au trade d'origine (↳).</p>
+        @if (_message != null)
+        {
+            <div class="alert success">@_message</div>
+        }
+    </div>
+}
+
+@code {
+    private readonly HashSet<string> _expanded = new();
+    private Trade? _unwindTrade;
+    private double _unwindQuantity;
+    private BuildResult<Trade>? _unwindPreview;
+    private string? _message;
+
+    protected override void OnTick() => PreviewUnwind();
+
+    private void Toggle(string id)
+    {
+        if (!_expanded.Remove(id)) _expanded.Add(id);
+    }
+
+    private void StartUnwind(Trade trade, double open)
+    {
+        _unwindTrade = trade;
+        _unwindQuantity = open;
+        _message = null;
+        Watch(trade.Legs.Where(l => l.Kind != LegKind.CustomOption).Select(l => l.Instrument));
+        PreviewUnwind();
+    }
+
+    private void PreviewUnwind()
+    {
+        if (_unwindTrade == null) return;
+        _unwindPreview = TradeFactory.Unwind(_unwindTrade, _unwindQuantity, Blotter.OpenQuantity(_unwindTrade.Id), Store);
+    }
+
+    private void ConfirmUnwind()
+    {
+        if (_unwindTrade == null) return;
+        var result = TradeFactory.Unwind(_unwindTrade, _unwindQuantity, Blotter.OpenQuantity(_unwindTrade.Id), Store);
+        if (!result.IsSuccess)
+        {
+            _unwindPreview = result;
+            return;
+        }
+        var trade = Blotter.Add(result.Value!);
+        _message = $"Débouclage {trade.Id} enregistré (lié à {trade.ParentTradeId}).";
+        _unwindTrade = null;
+        _unwindPreview = null;
+    }
+}
